@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dl-kai-am",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // workers.dev would bypass Cloudflare Access on /admin
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "dl.kai.am", "custom_domain": true }],
+  "kv_namespaces": [{ "binding": "LINKS", "id": "c5b60ac31c9847259023ce1ed8d20957" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "kai-am-files" }],
+  "vars": {
+    // e.g. "kai.cloudflareaccess.com"
+    "ACCESS_TEAM_DOMAIN": "",
+    // Application Audience (AUD) tag of the Access app protecting kai.am/admin
+    "ACCESS_AUD": ""
+  }
+}

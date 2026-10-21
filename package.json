@@ -1,0 +1,18 @@
+{
+  "name": "kai.am",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jose": "^6.2.13"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "wrangler": "^4.151.3"
+  }
+}
