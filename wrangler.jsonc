@@ -10,11 +10,6 @@
   "kv_namespaces": [{ "binding": "LINKS", "id": "c5b60ac31c9847259023ce1ed8d20957" }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "kai-am-files" }],
   // per-IP limit on public slug lookups; video seeking issues many range requests, so keep it generous
-  "ratelimits": [{ "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } }],
-  "vars": {
-    // e.g. "kai.cloudflareaccess.com"
-    "ACCESS_TEAM_DOMAIN": "",
-    // Application Audience (AUD) tag of the Access app protecting kai.am/admin
-    "ACCESS_AUD": ""
-  }
+  "ratelimits": [{ "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } }]
+  // ACCESS_TEAM_DOMAIN and ACCESS_AUD are Worker secrets (`wrangler secret put`), so deploys never reset them
 }

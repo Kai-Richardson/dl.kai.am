@@ -28,8 +28,17 @@ npm run dev                      # http://localhost:8787/admin
 ## Access setup (one time)
 
 1. Zero Trust dashboard → Access → Applications → Add → Self-hosted. Domain `dl.kai.am`, path `admin`. Add an Allow policy for your email (one-time PIN or GitHub login).
-2. Copy the application's **AUD tag** into `ACCESS_AUD` in `wrangler.jsonc`, and your team domain (`<team>.cloudflareaccess.com`) into `ACCESS_TEAM_DOMAIN`.
-3. `npm run deploy`.
+2. Add the app's **AUD tag** and your team domain (`<team>.cloudflareaccess.com`) as the GitHub secrets `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN`. The deploy job pushes them to the Worker as Worker secrets.
+
+## Deploys
+
+Pushes to `master` deploy through GitHub Actions after the checks pass. Repo secrets:
+
+- `CLOUDFLARE_API_TOKEN`: from the **Edit Cloudflare Workers** token template
+- `CLOUDFLARE_ACCOUNT_ID`
+- `ACCESS_AUD`, `ACCESS_TEAM_DOMAIN`
+
+`npm run deploy` still works locally and leaves the Worker secrets alone.
 
 ## ShareX
 

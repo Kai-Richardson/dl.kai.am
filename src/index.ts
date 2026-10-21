@@ -5,7 +5,8 @@ type Link =
   | { type: "url"; target: string; created: number }
   | { type: "file"; target: string; filename: string; size: number; created: number };
 
-type Bindings = Env & { DEV_NO_AUTH?: string };
+// Secrets aren't in wrangler.jsonc, so `wrangler types` can't see them.
+type Bindings = Env & { DEV_NO_AUTH?: string; ACCESS_TEAM_DOMAIN?: string; ACCESS_AUD?: string };
 
 const SLUG = /^[A-Za-z0-9_-]{1,64}$/;
 const RESERVED: Record<string, true> = { admin: true, "favicon.ico": true, "robots.txt": true };
