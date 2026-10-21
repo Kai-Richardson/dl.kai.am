@@ -9,6 +9,7 @@ type Bindings = Env & { DEV_NO_AUTH?: string };
 
 const SLUG = /^[A-Za-z0-9_-]{1,64}$/;
 const RESERVED: Record<string, true> = { admin: true, "favicon.ico": true, "robots.txt": true };
+const INLINE_TYPE = /^(image\/(png|jpeg|gif|webp|avif)|video\/[\w.+-]+|audio\/[\w.+-]+|application\/pdf|text\/plain)(;|$)/i;
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const bad = (msg: string, status = 400) => json({ error: msg }, status);
@@ -117,8 +118,9 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
     }
     if (m === "POST" && action === "complete") {
       const body = await req.json<{ parts: R2UploadedPart[] }>();
-      const obj = await upload.complete(body.parts);
       const slug = key.slice(0, key.indexOf("/"));
+      if (!SLUG.test(slug) || RESERVED[slug]) return bad("invalid key");
+      const obj = await upload.complete(body.parts);
       const filename = key.slice(slug.length + 1);
       await saveLink(env, slug, { type: "file", target: key, filename, size: obj.size, created: Date.now() });
       return json({ slug });
@@ -139,7 +141,12 @@ async function serveFile(req: Request, env: Bindings, link: Extract<Link, { type
   obj.writeHttpMetadata(headers);
   headers.set("etag", obj.httpEtag);
   headers.set("accept-ranges", "bytes");
-  headers.set("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(link.filename)}`);
+  // Files share an origin with /admin: only render known-inert types, download everything else, never sniff.
+  const type = headers.get("content-type") ?? "";
+  const inline = INLINE_TYPE.test(type);
+  headers.set("content-disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(link.filename)}`);
+  headers.set("x-content-type-options", "nosniff");
+  if (type !== "application/pdf") headers.set("content-security-policy", "sandbox");
   if (!("body" in obj)) return new Response(null, { status: 304, headers });
   const r = obj.range as { offset?: number; length?: number; suffix?: number } | undefined;
   if (req.headers.has("range") && r) {
@@ -157,6 +164,9 @@ export default {
     const parts = new URL(req.url).pathname.split("/").filter(Boolean).map(decodeURIComponent);
 
     if (parts[0] === "admin") {
+      // Blocks cross-site form/no-cors POSTs riding the Access cookie.
+      const site = req.headers.get("sec-fetch-site");
+      if (req.method !== "GET" && site && site !== "same-origin") return new Response("forbidden", { status: 403 });
       if (!(await authorized(req, env))) return new Response("forbidden", { status: 403 });
       return admin(req, env, parts);
     }
