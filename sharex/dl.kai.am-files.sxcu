@@ -1,0 +1,17 @@
+{
+  "Version": "17.0.0",
+  "Name": "dl.kai.am files",
+  "DestinationType": "ImageUploader, TextUploader, FileUploader",
+  "RequestMethod": "POST",
+  "RequestURL": "https://dl.kai.am/admin/api/files",
+  "Parameters": {
+    "filename": "{filename}"
+  },
+  "Headers": {
+    "CF-Access-Client-Id": "REPLACE_WITH_SERVICE_TOKEN_CLIENT_ID",
+    "CF-Access-Client-Secret": "REPLACE_WITH_SERVICE_TOKEN_CLIENT_SECRET"
+  },
+  "Body": "Binary",
+  "URL": "{json:url}",
+  "ErrorMessage": "{json:error}"
+}

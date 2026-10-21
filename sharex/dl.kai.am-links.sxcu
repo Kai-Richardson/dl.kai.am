@@ -1,0 +1,15 @@
+{
+  "Version": "17.0.0",
+  "Name": "dl.kai.am links",
+  "DestinationType": "URLShortener",
+  "RequestMethod": "POST",
+  "RequestURL": "https://dl.kai.am/admin/api/links",
+  "Headers": {
+    "CF-Access-Client-Id": "REPLACE_WITH_SERVICE_TOKEN_CLIENT_ID",
+    "CF-Access-Client-Secret": "REPLACE_WITH_SERVICE_TOKEN_CLIENT_SECRET"
+  },
+  "Body": "JSON",
+  "Data": "{\"url\":\"{input}\"}",
+  "URL": "{json:url}",
+  "ErrorMessage": "{json:error}"
+}

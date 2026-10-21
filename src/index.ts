@@ -10,6 +10,10 @@ type Bindings = Env & { DEV_NO_AUTH?: string };
 const SLUG = /^[A-Za-z0-9_-]{1,64}$/;
 const RESERVED: Record<string, true> = { admin: true, "favicon.ico": true, "robots.txt": true };
 const INLINE_TYPE = /^(image\/(png|jpeg|gif|webp|avif)|video\/[\w.+-]+|audio\/[\w.+-]+|application\/pdf|text\/plain)(;|$)/i;
+const MIME = /^[\w.+-]+\/[\w.+-]+$/;
+// KV metadata caps at 1024 bytes and holds the whole link record, so targets and filenames stay small.
+const MAX_URL = 800;
+const MAX_FILENAME_BYTES = 255;
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const bad = (msg: string, status = 400) => json({ error: msg }, status);
@@ -19,6 +23,15 @@ function randomSlug(len = 7) {
   const bytes = crypto.getRandomValues(new Uint8Array(len));
   return Array.from(bytes, (b) => chars[b % chars.length]).join("");
 }
+
+function cleanFilename(raw: unknown): string | Response {
+  const name = typeof raw === "string" ? raw.replace(/[/\\]/g, "_").trim() : "";
+  if (!name) return bad("missing filename");
+  if (new TextEncoder().encode(name).length > MAX_FILENAME_BYTES) return bad(`filename too long (max ${MAX_FILENAME_BYTES} bytes)`);
+  return name;
+}
+
+const cleanType = (raw: unknown) => (typeof raw === "string" && MIME.test(raw) ? raw : "application/octet-stream");
 
 async function pickSlug(env: Bindings, wanted: unknown): Promise<string | Response> {
   if (wanted) {
@@ -55,6 +68,8 @@ async function authorized(req: Request, env: Bindings) {
 async function admin(req: Request, env: Bindings, parts: string[]): Promise<Response> {
   const [, api, resource, id, action] = parts;
   if (!api) return new Response(adminHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
+  const reqUrl = new URL(req.url);
+  const created = (slug: string) => json({ slug, url: `${reqUrl.origin}/${slug}` });
   if (api !== "api") return bad("not found", 404);
   const m = req.method;
 
@@ -78,10 +93,24 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
       return bad("invalid url");
     }
     if (url.protocol !== "https:" && url.protocol !== "http:") return bad("invalid url");
+    if (url.href.length > MAX_URL) return bad(`url too long (max ${MAX_URL} chars)`);
     const slug = await pickSlug(env, body.slug);
     if (slug instanceof Response) return slug;
     await saveLink(env, slug, { type: "url", target: url.href, created: Date.now() });
-    return json({ slug });
+    return created(slug);
+  }
+
+  // Single-request upload for ShareX ("Binary" body); Workers Free caps request bodies at 100 MB.
+  if (resource === "files" && !id && m === "POST") {
+    if (!req.body || !req.headers.get("content-length")) return bad("missing body or content-length", 411);
+    const filename = cleanFilename(reqUrl.searchParams.get("filename"));
+    if (filename instanceof Response) return filename;
+    const slug = await pickSlug(env, reqUrl.searchParams.get("slug"));
+    if (slug instanceof Response) return slug;
+    const key = `${slug}/${filename}`;
+    const obj = await env.FILES.put(key, req.body, { httpMetadata: { contentType: cleanType(req.headers.get("content-type")) } });
+    await saveLink(env, slug, { type: "file", target: key, filename, size: obj.size, created: Date.now() });
+    return created(slug);
   }
 
   if (resource === "links" && id && m === "DELETE") {
@@ -95,19 +124,19 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
   // Multipart upload through the Worker: each part stays under the 100 MB request body cap.
   if (resource === "uploads" && !id && m === "POST") {
     const body = await req.json<{ filename?: string; contentType?: string; slug?: string }>();
-    const filename = body.filename?.replace(/[/\\]/g, "_").trim();
-    if (!filename) return bad("missing filename");
+    const filename = cleanFilename(body.filename);
+    if (filename instanceof Response) return filename;
     const slug = await pickSlug(env, body.slug);
     if (slug instanceof Response) return slug;
     const key = `${slug}/${filename}`;
     const upload = await env.FILES.createMultipartUpload(key, {
-      httpMetadata: { contentType: body.contentType || "application/octet-stream" },
+      httpMetadata: { contentType: cleanType(body.contentType) },
     });
     return json({ slug, key, uploadId: upload.uploadId });
   }
 
   if (resource === "uploads" && id) {
-    const key = new URL(req.url).searchParams.get("key");
+    const key = reqUrl.searchParams.get("key");
     if (!key) return bad("missing key");
     const upload = env.FILES.resumeMultipartUpload(key, id);
 
@@ -123,7 +152,7 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
       const obj = await upload.complete(body.parts);
       const filename = key.slice(slug.length + 1);
       await saveLink(env, slug, { type: "file", target: key, filename, size: obj.size, created: Date.now() });
-      return json({ slug });
+      return created(slug);
     }
     if (m === "DELETE") {
       await upload.abort();
@@ -146,6 +175,8 @@ async function serveFile(req: Request, env: Bindings, link: Extract<Link, { type
   const inline = INLINE_TYPE.test(type);
   headers.set("content-disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(link.filename)}`);
   headers.set("x-content-type-options", "nosniff");
+  // Lets browsers reuse bytes (video seeking, re-opens) instead of spending Worker requests.
+  headers.set("cache-control", "public, max-age=3600");
   if (type !== "application/pdf") headers.set("content-security-policy", "sandbox");
   if (!("body" in obj)) return new Response(null, { status: 304, headers });
   const r = obj.range as { offset?: number; length?: number; suffix?: number } | undefined;
@@ -173,7 +204,11 @@ export default {
 
     if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
     if (parts.length === 0) return new Response("dl.kai.am\n");
-    if (parts.length !== 1) return new Response("not found", { status: 404 });
+    // Skip KV for paths that can never be a slug (favicon.ico, scanners) to save free-tier reads.
+    if (parts.length !== 1 || !SLUG.test(parts[0])) return new Response("not found", { status: 404 });
+
+    const { success } = await env.LIMITER.limit({ key: req.headers.get("cf-connecting-ip") ?? "" });
+    if (!success) return new Response("slow down", { status: 429, headers: { "retry-after": "60" } });
 
     const link = await env.LINKS.get<Link>(parts[0], "json");
     if (!link) return new Response("not found", { status: 404 });
