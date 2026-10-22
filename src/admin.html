@@ -128,7 +128,7 @@ async function load() {
     const target = document.createElement("td");
     target.textContent = l.type === "file" ? `file: ${l.filename}` : l.target;
     const size = document.createElement("td");
-    size.textContent = l.type !== "file" ? "—" : l.size < 0.05 * 1048576 ? "<0.1 MB" : `${(l.size / 1048576).toFixed(1)} MB`;
+    size.textContent = l.type !== "file" ? "—" : l.size < 1048576 ? `${(l.size / 1024).toFixed(2)} KB` : `${(l.size / 1048576).toFixed(2)} MB`;
     const expires = document.createElement("td");
     expires.textContent = l.expires ? new Date(l.expires).toLocaleDateString() : "—";
     const actions = document.createElement("td");
