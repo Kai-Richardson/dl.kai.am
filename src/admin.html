@@ -6,12 +6,15 @@
 <title>dl.kai.am admin</title>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-  body { max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+  body { max-width: 1200px; margin: 2rem auto; padding: 0 1.5rem; }
   form { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
   input[type=url], input[type=file] { flex: 1 1 260px; }
   input[name=slug] { width: 9rem; }
   table { width: 100%; border-collapse: collapse; }
-  td, th { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid #8884; word-break: break-all; }
+  td, th { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #8884; }
+  /* only the target wraps; slug and the delete button stay on one line */
+  td:nth-child(1), td:nth-child(3) { white-space: nowrap; }
+  td:nth-child(2) { overflow-wrap: anywhere; width: 100%; }
   #status { min-height: 1.5em; }
   .error { color: #d33; }
 </style>
