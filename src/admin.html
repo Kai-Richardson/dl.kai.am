@@ -16,8 +16,9 @@
   input[name=slug] { width: 11rem; }
   table { width: 100%; border-collapse: collapse; }
   td, th { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #8884; }
-  /* only the target wraps; slug and the delete button stay on one line */
-  td:nth-child(1), td:nth-child(3) { white-space: nowrap; }
+  /* only the target wraps; slug, expiry and the delete button stay on one line */
+  td:nth-child(1), td:nth-child(3), td:nth-child(4) { white-space: nowrap; }
+  td:nth-child(3) { color: #999; font-size: .9em; }
   td:nth-child(2) { overflow-wrap: anywhere; width: 100%; }
   #status { min-height: 1.5em; }
   .error { color: #d33; }
@@ -48,7 +49,7 @@
 
 <h2>Links</h2>
 <table>
-  <thead><tr><th>Slug</th><th>Target</th><th></th></tr></thead>
+  <thead><tr><th>Slug</th><th>Target</th><th>Expires</th><th></th></tr></thead>
   <tbody id="links"></tbody>
 </table>
 
@@ -129,8 +130,9 @@ async function load() {
     a.href = "/" + l.slug; a.textContent = l.slug;
     slug.append(a);
     const target = document.createElement("td");
-    target.textContent = (l.type === "file" ? `file: ${l.filename} (${fmtSize(l.size)})` : l.target)
-      + (l.expires ? ` · expires ${new Date(l.expires).toLocaleDateString()}` : "");
+    target.textContent = l.type === "file" ? `file: ${l.filename} (${fmtSize(l.size)})` : l.target;
+    const expires = document.createElement("td");
+    expires.textContent = l.expires ? new Date(l.expires).toLocaleDateString() : "—";
     const actions = document.createElement("td");
     const del = document.createElement("button");
     del.textContent = "Delete";
@@ -140,7 +142,7 @@ async function load() {
       catch (err) { setStatus(err.message, true); }
     };
     actions.append(del);
-    tr.append(slug, target, actions);
+    tr.append(slug, target, expires, actions);
     return tr;
   }));
 }
