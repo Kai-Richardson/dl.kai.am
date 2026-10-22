@@ -202,6 +202,8 @@ async function serveFile(req: Request, env: Bindings, link: Extract<Link, { type
   // Lets browsers reuse bytes (video seeking, re-opens) instead of spending Worker requests.
   headers.set("cache-control", "public, max-age=3600");
   if (type !== "application/pdf") headers.set("content-security-policy", "sandbox");
+  // Chrome's built-in media player fetches with crossorigin=anonymous from the sandboxed (opaque) origin.
+  headers.set("access-control-allow-origin", "*");
   if (!("body" in obj)) return new Response(null, { status: 304, headers });
   const r = obj.range as { offset?: number; length?: number; suffix?: number } | undefined;
   if (req.headers.has("range") && r) {
