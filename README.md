@@ -4,6 +4,7 @@ Link shortener and file share on one Cloudflare Worker.
 
 - `dl.kai.am/<slug>` redirects to a URL or serves a file from R2 (range requests work, so video seeks).
 - `dl.kai.am/admin` is where you create links, upload files, and delete them. Cloudflare Access protects it. The Worker also checks the Access JWT and returns 403 if Access isn't configured.
+- Links and files can expire after 1 day, 1 week, or 30 days. The slug gets a KV TTL, so it disappears on time. Expiring files go under `expire-<1d|7d|30d>/` in R2, and the bucket's lifecycle rules delete them, usually within a day of expiry.
 
 Storage: KV `LINKS` maps slug → `{type, target, ...}`. R2 bucket `kai-am-files` holds files under `<slug>/<filename>`. Admin-page uploads go through the Worker in 50 MB multipart chunks, so the 100 MB request cap doesn't limit file size. ShareX uploads are a single request, so they're capped at 100 MB.
 

@@ -24,6 +24,7 @@
   <input type="url" name="url" placeholder="https://…" required maxlength="800" aria-label="URL">
   <input name="slug" placeholder="slug (optional)" pattern="[A-Za-z0-9_-]{1,64}" aria-label="Custom slug">
   <button type="button" class="random">Random</button>
+  <select name="expiry" aria-label="Expires"><option value="">Never expires</option><option value="1d">1 day</option><option value="7d">1 week</option><option value="30d">30 days</option></select>
   <button>Shorten</button>
 </form>
 
@@ -32,6 +33,7 @@
   <input type="file" name="file" required aria-label="File">
   <input name="slug" placeholder="slug (optional)" pattern="[A-Za-z0-9_-]{1,64}" aria-label="Custom slug">
   <button type="button" class="random">Random</button>
+  <select name="expiry" aria-label="Expires"><option value="">Never expires</option><option value="1d">1 day</option><option value="7d">1 week</option><option value="30d">30 days</option></select>
   <button>Upload</button>
 </form>
 
@@ -74,7 +76,7 @@ document.getElementById("link-form").onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target;
   try {
-    const { slug } = await post("links", { url: f.url.value, slug: f.slug.value || undefined });
+    const { slug } = await post("links", { url: f.url.value, slug: f.slug.value || undefined, expiry: f.expiry.value || undefined });
     f.reset();
     done(slug);
   } catch (err) { setStatus(err.message, true); }
@@ -86,7 +88,7 @@ document.getElementById("file-form").onsubmit = async (e) => {
   const file = f.file.files[0];
   let up;
   try {
-    up = await post("uploads", { filename: file.name, contentType: file.type, slug: f.slug.value || undefined });
+    up = await post("uploads", { filename: file.name, contentType: file.type, slug: f.slug.value || undefined, expiry: f.expiry.value || undefined });
     const q = "?key=" + encodeURIComponent(up.key);
     const parts = [];
     const count = Math.max(1, Math.ceil(file.size / PART_SIZE));
@@ -120,7 +122,8 @@ async function load() {
     a.href = "/" + l.slug; a.textContent = l.slug;
     slug.append(a);
     const target = document.createElement("td");
-    target.textContent = l.type === "file" ? `file: ${l.filename} (${fmtSize(l.size)})` : l.target;
+    target.textContent = (l.type === "file" ? `file: ${l.filename} (${fmtSize(l.size)})` : l.target)
+      + (l.expires ? ` · expires ${new Date(l.expires).toLocaleDateString()}` : "");
     const actions = document.createElement("td");
     const del = document.createElement("button");
     del.textContent = "Delete";

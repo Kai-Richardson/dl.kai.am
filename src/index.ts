@@ -5,6 +5,13 @@ type Link =
   | { type: "url"; target: string; created: number }
   | { type: "file"; target: string; filename: string; size: number; created: number };
 
+// Expiring files live under `expire-<id>/`, where an R2 lifecycle rule deletes them after that many days;
+// the KV entry gets the same TTL so the slug disappears on time. Keep in sync with the bucket's lifecycle rules.
+const EXPIRY_DAYS: Record<string, number> = { "1d": 1, "7d": 7, "30d": 30 };
+const FILE_KEY = /^(?:expire-(\w+)\/)?([^/]+)\/(.+)$/;
+// A custom slug named like an expiry folder would land under that lifecycle rule.
+const isReserved = (slug: string) => RESERVED[slug] || slug.startsWith("expire-");
+
 // Secrets aren't in wrangler.jsonc, so `wrangler types` can't see them.
 type Bindings = Env & { DEV_NO_AUTH?: string; ACCESS_TEAM_DOMAIN?: string; ACCESS_AUD?: string };
 
@@ -36,7 +43,7 @@ const cleanType = (raw: unknown) => (typeof raw === "string" && MIME.test(raw) ?
 
 async function pickSlug(env: Bindings, wanted: unknown): Promise<string | Response> {
   if (wanted) {
-    if (typeof wanted !== "string" || !SLUG.test(wanted) || RESERVED[wanted]) return bad("invalid slug");
+    if (typeof wanted !== "string" || !SLUG.test(wanted) || isReserved(wanted)) return bad("invalid slug");
     if (await env.LINKS.get(wanted)) return bad("slug taken", 409);
     return wanted;
   }
@@ -46,8 +53,19 @@ async function pickSlug(env: Bindings, wanted: unknown): Promise<string | Respon
   }
 }
 
-const saveLink = (env: Bindings, slug: string, link: Link) =>
-  env.LINKS.put(slug, JSON.stringify(link), { metadata: link });
+const saveLink = (env: Bindings, slug: string, link: Link, expiry: string | undefined) =>
+  env.LINKS.put(slug, JSON.stringify(link), {
+    metadata: link,
+    expirationTtl: expiry ? EXPIRY_DAYS[expiry] * 86400 : undefined,
+  });
+
+function parseExpiry(raw: unknown): string | undefined | Response {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  return typeof raw === "string" && EXPIRY_DAYS[raw] ? raw : bad(`expiry must be one of ${Object.keys(EXPIRY_DAYS).join(", ")}`);
+}
+
+const fileKey = (expiry: string | undefined, slug: string, filename: string) =>
+  `${expiry ? `expire-${expiry}/` : ""}${slug}/${filename}`;
 
 let jwks: JWTVerifyGetKey | undefined;
 
@@ -79,14 +97,14 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
     let cursor: string | undefined;
     do {
       const page = await env.LINKS.list<Link>({ cursor });
-      for (const k of page.keys) links.push({ slug: k.name, ...k.metadata });
+      for (const k of page.keys) links.push({ slug: k.name, ...k.metadata, expires: k.expiration ? k.expiration * 1000 : undefined });
       cursor = page.list_complete ? undefined : page.cursor;
     } while (cursor);
     return json(links);
   }
 
   if (resource === "links" && !id && m === "POST") {
-    const body = await req.json<{ url?: string; slug?: string }>();
+    const body = await req.json<{ url?: string; slug?: string; expiry?: string }>();
     let url: URL;
     try {
       url = new URL(body.url ?? "");
@@ -95,9 +113,11 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
     }
     if (url.protocol !== "https:" && url.protocol !== "http:") return bad("invalid url");
     if (url.href.length > MAX_URL) return bad(`url too long (max ${MAX_URL} chars)`);
+    const expiry = parseExpiry(body.expiry);
+    if (expiry instanceof Response) return expiry;
     const slug = await pickSlug(env, body.slug);
     if (slug instanceof Response) return slug;
-    await saveLink(env, slug, { type: "url", target: url.href, created: Date.now() });
+    await saveLink(env, slug, { type: "url", target: url.href, created: Date.now() }, expiry);
     return created(slug);
   }
 
@@ -106,11 +126,13 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
     if (!req.body || !req.headers.get("content-length")) return bad("missing body or content-length", 411);
     const filename = cleanFilename(reqUrl.searchParams.get("filename"));
     if (filename instanceof Response) return filename;
+    const expiry = parseExpiry(reqUrl.searchParams.get("expiry"));
+    if (expiry instanceof Response) return expiry;
     const slug = await pickSlug(env, reqUrl.searchParams.get("slug"));
     if (slug instanceof Response) return slug;
-    const key = `${slug}/${filename}`;
+    const key = fileKey(expiry, slug, filename);
     const obj = await env.FILES.put(key, req.body, { httpMetadata: { contentType: cleanType(req.headers.get("content-type")) } });
-    await saveLink(env, slug, { type: "file", target: key, filename, size: obj.size, created: Date.now() });
+    await saveLink(env, slug, { type: "file", target: key, filename, size: obj.size, created: Date.now() }, expiry);
     return created(slug);
   }
 
@@ -124,12 +146,14 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
 
   // Multipart upload through the Worker: each part stays under the 100 MB request body cap.
   if (resource === "uploads" && !id && m === "POST") {
-    const body = await req.json<{ filename?: string; contentType?: string; slug?: string }>();
+    const body = await req.json<{ filename?: string; contentType?: string; slug?: string; expiry?: string }>();
     const filename = cleanFilename(body.filename);
     if (filename instanceof Response) return filename;
+    const expiry = parseExpiry(body.expiry);
+    if (expiry instanceof Response) return expiry;
     const slug = await pickSlug(env, body.slug);
     if (slug instanceof Response) return slug;
-    const key = `${slug}/${filename}`;
+    const key = fileKey(expiry, slug, filename);
     const upload = await env.FILES.createMultipartUpload(key, {
       httpMetadata: { contentType: cleanType(body.contentType) },
     });
@@ -148,11 +172,10 @@ async function admin(req: Request, env: Bindings, parts: string[]): Promise<Resp
     }
     if (m === "POST" && action === "complete") {
       const body = await req.json<{ parts: R2UploadedPart[] }>();
-      const slug = key.slice(0, key.indexOf("/"));
-      if (!SLUG.test(slug) || RESERVED[slug]) return bad("invalid key");
+      const [, expiry, slug, filename] = key.match(FILE_KEY) ?? [];
+      if (!slug || !SLUG.test(slug) || isReserved(slug) || (expiry && !EXPIRY_DAYS[expiry])) return bad("invalid key");
       const obj = await upload.complete(body.parts);
-      const filename = key.slice(slug.length + 1);
-      await saveLink(env, slug, { type: "file", target: key, filename, size: obj.size, created: Date.now() });
+      await saveLink(env, slug, { type: "file", target: key, filename, size: obj.size, created: Date.now() }, expiry);
       return created(slug);
     }
     if (m === "DELETE") {
